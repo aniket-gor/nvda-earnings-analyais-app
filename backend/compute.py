@@ -703,13 +703,13 @@ def build_data_explorer(
     def _stats(series: pd.Series, scale: float = 100) -> dict:
         s = series * scale
         return {
-            "Mean"        : round(s.mean(), 4),
-            "Median"      : round(s.median(), 4),
-            "Min"         : round(s.min(), 4),
-            "Max"         : round(s.max(), 4),
-            "Range"       : round(s.max() - s.min(), 4),
-            "StdDev"      : round(s.std(), 4),
-            "StdDev/Mean" : abs(round(s.std()/s.mean(), 4)) if s.std() != 0 else None,
+            "Mean"        : round(s.mean(), 2),
+            "Median"      : round(s.median(), 2),
+            "Min"         : round(s.min(), 2),
+            "Max"         : round(s.max(), 2),
+            "Range"       : round(s.max() - s.min(), 2),
+            "StdDev"      : round(s.std(), 2),
+            "StdDev/Mean" : abs(round(s.std()/s.mean(), 2)) if s.std() != 0 else None,
         }
 
     # ── Factor Returns table ───────────────────────────────────────
