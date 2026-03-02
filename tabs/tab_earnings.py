@@ -251,7 +251,7 @@ def render():
                 snap = st.selectbox(
                     "Snapshot",
                     snap_labels,
-                    index=snap_labels.index(st.session_state["ee_factor_snap"]),
+                    #index=snap_labels.index(st.session_state["ee_factor_snap"]),
                     key="ee_factor_snap",
                 )
 
