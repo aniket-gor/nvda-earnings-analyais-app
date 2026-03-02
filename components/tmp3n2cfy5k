@@ -1,0 +1,1182 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Sat Feb 28 01:16:41 2026
+@author: anike
+"""
+
+# components/charts.py
+
+import plotly.graph_objects as go
+import pandas as pd
+import numpy as np
+from config import THEME, RETURN_COLORS, FACTOR_OVERLAY_COLORS, FACTORS
+from backend.compute import _metric_label, SCATTER_CAR_OFFSETS
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# UTILITIES
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _hex_to_rgba(hex_color: str, alpha: float = 1.0) -> str:
+    """
+    Convert #RRGGBB to rgba(r, g, b, alpha).
+    Used for fill colors that need transparency from a solid hex token.
+    """
+    h = hex_color.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return f"rgba({r},{g},{b},{alpha})"
+
+
+def _title_annotation(text: str, size: int = None) -> dict:
+    """
+    Standard top-left chart title annotation.
+    All chart functions call this instead of hand-writing annotation dicts.
+    """
+    return dict(
+        text    = text,
+        x=0.0,  y=1.0,
+        xref    = "paper",
+        yref    = "paper",
+        xanchor = "left",
+        yanchor = "bottom",
+        showarrow = False,
+        font    = dict(
+            size   = size or THEME["font_size_title"],
+            family = THEME["font_family"],
+            color  = THEME["text_primary"],
+        ),
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# BASE LAYOUT
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Default axis styling shared across all charts
+_XAXIS_BASE = dict(
+    showgrid   = False,
+    showline   = True,
+    linecolor  = THEME["border_subtle"],
+    zeroline   = False,
+    tickfont   = dict(
+        size   = THEME["font_size_caption"],
+        family = THEME["font_family"],
+        color  = THEME["text_muted"],
+    ),
+    fixedrange = False,
+)
+
+_YAXIS_BASE = dict(
+    showgrid   = True,
+    gridcolor  = THEME["chart_grid"],
+    showline   = False,
+    zeroline   = False,
+    tickfont   = dict(
+        size   = THEME["font_size_caption"],
+        family = THEME["font_family"],
+        color  = THEME["text_muted"],
+    ),
+    fixedrange = False,
+)
+
+# Canonical updatemenu button styling (used by drawdown + returns/equity toggles)
+_UPDATEMENU_STYLE = dict(
+    bgcolor     = THEME["bg_panel_alt"],
+    bordercolor = THEME["border_subtle"],
+    borderwidth = 1,
+    font        = dict(
+        size   = THEME["font_size_caption"],
+        family = THEME["font_family"],
+        color  = THEME["text_primary"],
+    ),
+    pad = dict(l=3, r=3, t=3, b=3),
+)
+
+# Canonical legend styling
+_LEGEND_H = dict(              # horizontal legend (below chart)
+    orientation = "h",
+    x           = 0.0,
+    y           = -0.12,
+    font        = dict(size=THEME["font_size_caption"], family=THEME["font_family"]),
+    bgcolor     = "rgba(0,0,0,0)",
+)
+
+_LEGEND_V = dict(              # vertical legend (top-right)
+    orientation = "v",
+    x           = 1.0,
+    y           = 1.0,
+    xanchor     = "right",
+    yanchor     = "top",
+    font        = dict(size=THEME["font_size_caption"], family=THEME["font_family"]),
+    bgcolor     = "rgba(255,255,255,0.85)",
+    bordercolor = THEME["border_subtle"],
+    borderwidth = 1,
+)
+
+
+def apply_base_layout(
+    fig        : go.Figure,
+    title      : str  = None,
+    height     : int  = 400,
+    margin     : dict = None,
+    hovermode  : str  = "x unified",
+    showlegend : bool = True,
+    dragmode         = "zoom",
+    legend_style : dict = None,
+) -> go.Figure:
+    """
+    Applies the shared BASE_LAYOUT to any Plotly figure, then overlays
+    per-call overrides. All chart factory functions call this as their
+    last step before returning.
+
+    Args:
+        fig          : The Plotly figure to style.
+        title        : If provided, adds a standard top-left title annotation.
+        height       : Figure height in pixels.
+        margin       : Override default margin dict(l=8, r=8, t=44, b=8).
+        hovermode    : Plotly hovermode string.
+        showlegend   : Whether to show the legend.
+        dragmode     : Plotly dragmode ('zoom', 'pan', False, etc.)
+        legend_style : Pass _LEGEND_H or _LEGEND_V (defaults to _LEGEND_H).
+    """
+    _margin = margin or dict(l=8, r=8, t=44, b=8)
+    _legend = legend_style or _LEGEND_H
+
+    layout = dict(
+        paper_bgcolor = THEME["chart_bg"],
+        plot_bgcolor  = THEME["chart_bg"],
+        font          = dict(
+            family = THEME["font_family"],
+            size   = THEME["font_size_base"],
+            color  = THEME["text_primary"],
+        ),
+        height     = height,
+        margin     = _margin,
+        hovermode  = hovermode,
+        showlegend = showlegend,
+        dragmode   = dragmode,
+        legend     = _legend,
+    )
+
+    if title:
+        layout["annotations"] = [_title_annotation(title)]
+
+    fig.update_layout(**layout)
+
+    # Apply axis defaults — individual chart functions can override after this
+    fig.update_xaxes(**_XAXIS_BASE)
+    fig.update_yaxes(**_YAXIS_BASE)
+
+    return fig
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# COLORSCALES  (shared across heatmap functions)
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Red → pink → near-white → light green → dark green
+# Used by: plot_factor_heatmap, plot_earnings_factor_heatmap, plot_car_heatmap
+DIVERGING_RdGn = [
+    [0.00, "#dc2626"],
+    [0.35, "#fca5a5"],
+    [0.50, "#f9fafb"],
+    [0.65, "#86efac"],
+    [1.00, "#15803d"],
+]
+
+# Muted version for CAR heatmap (softer, less saturated)
+DIVERGING_RdGn_SOFT = [
+    [0.00, "#fca5a5"],
+    [0.50, "#f9fafb"],
+    [1.00, "#86efac"],
+]
+
+# Red → near-white → green (for correlation matrix, tighter range)
+DIVERGING_CORR = [
+    [0.0, "#dc2626"],
+    [0.5, "#f9fafb"],
+    [1.0, "#16a34a"],
+]
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CHART FUNCTIONS
+# ══════════════════════════════════════════════════════════════════════════════
+
+def plot_returns_and_equity(
+    df: pd.DataFrame,
+    earnings_dates: list,
+    factor_overlays: list = None,
+    df_returns: pd.DataFrame = None,
+    show_earnings_line: bool = True,
+    show_earnings_band: bool = False,
+) -> go.Figure:
+    from plotly.subplots import make_subplots
+
+    factor_overlays = factor_overlays or []
+
+    fig = make_subplots(
+        rows=2, cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.06,
+        row_heights=[0.45, 0.55],
+    )
+
+    series_map = {
+        "Total"         : "nvda_return",
+        "Systematic"    : "systematic_return",
+        "Idiosyncratic" : "idio_return",
+    }
+
+    if show_earnings_band:
+        trading_days = df.index.tolist()
+        for ed in earnings_dates:
+            ed   = pd.Timestamp(ed)
+            pre  = [d for d in trading_days if d <= ed]
+            post = [d for d in trading_days if d >  ed]
+            x0   = pre[-5]  if len(pre)  >= 5 else pre[0]
+            x1   = post[4]  if len(post) >= 5 else post[-1]
+            for row in [1, 2]:
+                fig.add_vrect(
+                    x0=x0, x1=x1,
+                    fillcolor  = THEME["earnings_line"],
+                    opacity    = 0.08,
+                    layer      = "below",
+                    line_width = 0,
+                    row=row, col=1,
+                )
+
+    for i, (label, col) in enumerate(series_map.items()):
+        r      = df[col] * 100
+        colors = [THEME["positive"] if v >= 0 else THEME["negative"] for v in r]
+        fig.add_trace(go.Bar(
+            x             = df.index,
+            y             = r,
+            name          = label,
+            marker_color  = colors,
+            visible       = (i == 0),
+            showlegend    = False,
+            hovertemplate = "%{x|%b %d, %Y}<br>Return: %{y:.3f}%<extra></extra>",
+        ), row=1, col=1)
+
+    for label, col in series_map.items():
+        equity = (1 + df[col]).cumprod()
+        fig.add_trace(go.Scatter(
+            x             = df.index,
+            y             = equity,
+            name          = label,
+            mode          = "lines",
+            line          = dict(color=RETURN_COLORS[label], width=1.8),
+            showlegend    = True,
+            hovertemplate = "%{x|%b %d, %Y}<br>$%{y:.3f}<extra>" + label + "</extra>",
+        ), row=2, col=1)
+
+    if factor_overlays and df_returns is not None:
+        for j, factor in enumerate(factor_overlays):
+            col_name = f"ret_{factor}"
+            if col_name in df_returns.columns:
+                equity = (1 + df_returns[col_name]).cumprod()
+                fig.add_trace(go.Scatter(
+                    x             = df.index,
+                    y             = equity,
+                    name          = factor,
+                    mode          = "lines",
+                    line          = dict(
+                        color = FACTOR_OVERLAY_COLORS[j % len(FACTOR_OVERLAY_COLORS)],
+                        width = 1.2,
+                        dash  = "dot",
+                    ),
+                    showlegend    = True,
+                    hovertemplate = "%{x|%b %d, %Y}<br>$%{y:.3f}<extra>" + factor + "</extra>",
+                ), row=2, col=1)
+
+    if show_earnings_line:
+        for ed in earnings_dates:
+            ts = pd.Timestamp(ed).timestamp() * 1000
+            for row in [1, 2]:
+                fig.add_vline(
+                    x          = ts,
+                    line_width = 1,
+                    line_dash  = "dash",
+                    line_color = THEME["earnings_line"],
+                    opacity    = 0.8,
+                    row=row, col=1,
+                )
+
+    n_bar    = len(series_map)
+    n_eq     = len(series_map)
+    n_factor = len(factor_overlays)
+
+    series_buttons = []
+    for i, label in enumerate(series_map.keys()):
+        series_buttons.append(dict(
+            label  = label,
+            method = "update",
+            args   = [
+                {"visible": [j == i for j in range(n_bar)] + [True]*n_eq + [True]*n_factor},
+                {"annotations[0].text": f"{label} Daily Returns"},
+            ],
+        ))
+
+    fig.update_layout(updatemenus=[dict(
+        type       = "buttons",
+        direction  = "right",
+        x=1.0,     xanchor="right",
+        y=1.0,     yanchor="bottom",
+        showactive = False,
+        buttons    = series_buttons,
+        **_UPDATEMENU_STYLE,
+    )])
+
+    apply_base_layout(
+        fig,
+        height       = 520,
+        margin       = dict(l=8, r=8, t=36, b=8),
+        hovermode    = "x unified",
+        showlegend   = True,
+        legend_style = _LEGEND_H,
+    )
+
+    fig.update_xaxes(showspikes=False)
+    fig.update_yaxes(showspikes=False)
+    fig.update_yaxes(ticksuffix="%", row=1, col=1)
+    fig.update_yaxes(tickprefix="$", row=2, col=1)
+    fig.add_annotation(_title_annotation("Total Daily Returns",
+                                         size=THEME["font_size_title"]))
+    return fig
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+
+def plot_drawdown(df: pd.DataFrame, earnings_dates: list) -> go.Figure:
+
+    def to_drawdown(series: pd.Series) -> pd.Series:
+        cumret = (1 + series).cumprod()
+        return (cumret / cumret.cummax()) - 1
+
+    dd_total = to_drawdown(df["nvda_return"])
+    dd_sys   = to_drawdown(df["systematic_return"])
+    dd_idio  = to_drawdown(df["idio_return"])
+
+    fig = go.Figure()
+
+    for dd, label, visible in [
+        (dd_total, "Total",         True),
+        (dd_sys,   "Systematic",    False),
+        (dd_idio,  "Idiosyncratic", False),
+    ]:
+        color = RETURN_COLORS[label]
+        fig.add_trace(go.Scatter(
+            x             = df.index,
+            y             = dd * 100,
+            mode          = "lines",
+            name          = label,
+            line          = dict(color=color, width=1.5),
+            fill          = "tozeroy",
+            fillcolor     = _hex_to_rgba(color, 0.08),
+            visible       = visible,
+            hovertemplate = "%{x|%b %d, %Y}<br>Drawdown: %{y:.1f}%<extra></extra>",
+        ))
+
+    for ed in earnings_dates:
+        fig.add_vline(
+            x    = pd.Timestamp(ed).timestamp() * 1000,
+            line = dict(color=THEME["earnings_line"], width=1, dash="dot"),
+        )
+
+    fig.update_layout(updatemenus=[dict(
+        type       = "buttons",
+        direction  = "right",
+        x=1.0,     xanchor="right",
+        y=1.0,     yanchor="bottom",
+        showactive = True,
+        active     = 0,
+        buttons    = [
+            dict(label="Total",
+                 method="update",
+                 args=[{"visible": [True, False, False]},
+                       {"annotations": [_title_annotation("Total Returns Drawdown",
+                                        size=THEME["font_size_title"])]}]),
+            dict(label="Systematic",
+                 method="update",
+                 args=[{"visible": [False, True, False]},
+                       {"annotations": [_title_annotation("Systematic Returns Drawdown",
+                                        size=THEME["font_size_title"])]}]),
+            dict(label="Idiosyncratic",
+                 method="update",
+                 args=[{"visible": [False, False, True]},
+                       {"annotations": [_title_annotation("Idiosyncratic Returns Drawdown",
+                                        size=THEME["font_size_title"])]}]),
+        ],
+        **_UPDATEMENU_STYLE,
+    )])
+
+    apply_base_layout(
+        fig,
+        height     = 240,
+        margin     = dict(t=44, b=30, l=40, r=10),
+        showlegend = False,
+        hovermode  = "x unified",
+        dragmode   = False,
+    )
+
+    fig.update_yaxes(
+        ticksuffix    = "%",
+        zeroline      = True,
+        zerolinecolor = THEME["border_subtle"],
+        zerolinewidth = 1,
+    )
+    fig.add_annotation(_title_annotation("Total Returns Drawdown",
+                                         size=THEME["font_size_title"]))
+    return fig
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+
+def plot_factor_heatmap(contrib: pd.DataFrame) -> go.Figure:
+    """
+    Full-period factor contribution heatmap.
+    Factors as rows, dates as columns.
+    """
+    factors = [c for c in contrib.columns if c != "Idiosyncratic"] + ["Idiosyncratic"]
+    z       = (contrib[factors] * 100).T.values
+    max_val = float(np.abs(z).max())
+
+    fig = go.Figure(go.Heatmap(
+        z         = z,
+        x         = contrib.index,
+        y         = factors,
+        colorscale = DIVERGING_RdGn,
+        zmid=0,
+        zmin=-max_val,
+        zmax=max_val,
+        colorbar  = dict(
+            ticksuffix = "%",
+            tickfont   = dict(size=THEME["font_size_caption"]),
+            thickness  = 10,
+            len        = 0.8,
+        ),
+        hovertemplate = (
+            "<b>%{y}</b><br>"
+            "%{x|%b %d, %Y}<br>"
+            "Contribution: %{z:.2f}%<extra></extra>"
+        ),
+    ))
+
+    apply_base_layout(
+        fig,
+        title  = "Factor Contribution Heatmap",
+        height = 520,
+        margin = dict(t=44, b=30, l=120, r=10),
+        dragmode = "zoom",
+    )
+
+    fig.update_xaxes(fixedrange=False)
+    fig.update_yaxes(autorange="reversed", fixedrange=True)
+    return fig
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+
+def plot_earnings_factor_heatmap(
+    decomp: dict,
+    selected_event: str = None,
+) -> go.Figure:
+    if selected_event and selected_event in decomp["per_event"]:
+        df_plot = decomp["per_event"][selected_event]
+        title   = f"Factor Decomposition — {selected_event}"
+    else:
+        df_plot = decomp["average"]
+        title   = "Factor Decomposition — Average (All Events)"
+
+    factors = (
+        [f for f in df_plot.index if f not in ("Idiosyncratic", "NVDA Total")]
+        + ["Idiosyncratic", "NVDA Total"]
+    )
+    df_plot = df_plot.reindex(factors)
+    z       = df_plot.values.astype(float)
+    max_val = float(np.abs(z[~np.isnan(z)]).max()) if z.size > 0 else 1.0
+    snap_labels = decomp["snap_labels"]
+
+    fig = go.Figure(go.Heatmap(
+        z             = z,
+        x             = snap_labels,
+        y             = factors,
+        showscale     = False,
+        text          = [[f"{v:+.1f}%" if not np.isnan(v) else "—" for v in row] for row in z],
+        texttemplate  = "%{text}",
+        textfont      = dict(size=THEME["font_size_cell"],
+                             color=THEME["text_primary"]),
+        colorscale    = DIVERGING_RdGn,
+        zmid=0,
+        zmin=-max_val,
+        zmax=max_val,
+        hovertemplate = (
+            "<b>%{y}</b><br>%{x}<br>"
+            "Cum. Contribution: %{z:.2f}%<extra></extra>"
+        ),
+    ))
+
+    if "D0" in snap_labels:
+        d0_pos = snap_labels.index("D0")
+        fig.add_shape(
+            type="line",
+            x0=d0_pos + 0.5, x1=d0_pos + 0.5,
+            y0=-0.5,          y1=len(factors) - 0.5,
+            xref="x", yref="y",
+            line=dict(color=THEME["text_primary"], width=2, dash="dash"),
+        )
+
+    if "NVDA Total" in factors:
+        nvda_pos = factors.index("NVDA Total")
+        fig.add_shape(
+            type="line",
+            x0=-0.5,            x1=len(snap_labels) - 0.5,
+            y0=nvda_pos - 0.5,  y1=nvda_pos - 0.5,
+            xref="x", yref="y",
+            line=dict(color=THEME["border_subtle"], width=1),
+        )
+
+    apply_base_layout(
+        fig,
+        title    = title,
+        height   = 460,
+        margin   = dict(t=20, b=30, l=120, r=10),
+        dragmode = False,
+    )
+
+    fig.update_xaxes(fixedrange=True)
+    fig.update_yaxes(autorange="reversed", fixedrange=True)
+    return fig
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+
+def plot_car_heatmap(
+    car_data: dict,
+    selected_event: str = None,
+) -> go.Figure:
+    rows        = car_data["rows"]
+    snap_labels = car_data["snap_labels"]
+    z           = car_data["z"]
+    max_val     = max(abs(v) for row in z for v in row if v is not None) or 1.0
+
+    fig = go.Figure(go.Heatmap(
+        z             = z,
+        x             = snap_labels,
+        y             = rows,
+        colorscale    = DIVERGING_RdGn_SOFT,
+        zmid=0,
+        zmin=-max_val,
+        zmax=max_val,
+        xgap=0, ygap=0,
+        text          = [[f"{v:.1f}" if v is not None else "" for v in row] for row in z],
+        texttemplate  = "%{text}%",
+        textfont      = dict(size=THEME["font_size_caption"],
+                             color=THEME["text_primary"]),
+        colorbar      = dict(
+            ticksuffix = "%",
+            tickfont   = dict(size=THEME["font_size_caption"]),
+            thickness  = 10,
+            len        = 0.8,
+        ),
+        hovertemplate = (
+            "<b>%{y}</b><br>%{x}<br>"
+            "CAR: %{z:.2f}%<extra></extra>"
+        ),
+    ))
+
+    if "D0" in snap_labels:
+        d0_pos = snap_labels.index("D0")
+        fig.add_shape(
+            type="line",
+            x0=d0_pos + 0.5, x1=d0_pos + 0.5,
+            y0=-0.5,          y1=len(rows) - 0.5,
+            xref="x", yref="y",
+            line=dict(color=THEME["text_primary"], width=2, dash="dash"),
+        )
+
+    if selected_event and selected_event in rows:
+        row_pos = rows.index(selected_event)
+        fig.add_shape(
+            type="rect",
+            x0=-0.5,              x1=len(snap_labels) - 0.5,
+            y0=row_pos - 0.5,     y1=row_pos + 0.5,
+            xref="x", yref="y",
+            line=dict(color=THEME["primary"], width=2),
+            fillcolor="rgba(0,0,0,0)",
+        )
+
+    apply_base_layout(
+        fig,
+        title    = "Cumulative Abnormal Returns",
+        height   = 360,
+        margin   = dict(t=28, b=16, l=80, r=10),
+        dragmode = False,
+    )
+
+    fig.update_xaxes(fixedrange=True)
+    fig.update_yaxes(autorange=True, fixedrange=True)
+    return fig
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+
+def plot_car_line_chart(
+    car_lines: dict,
+    selected_event: str = None,
+) -> go.Figure:
+    day_offsets = car_lines["day_offsets"]
+    per_event   = car_lines["per_event"]
+    average     = car_lines["average"]
+
+    fig = go.Figure()
+
+    fig.add_hline(y=0, line=dict(color=THEME["border_subtle"], width=1))
+
+    fig.add_vline(
+        x=0,
+        line=dict(color=THEME["neutral"], width=1.5, dash="dash"),
+        annotation_text     = "D0",
+        annotation_position = "top",
+        annotation_font     = dict(size=THEME["font_size_caption"],
+                                   color=THEME["text_muted"]),
+    )
+    fig.add_vline(
+        x=1,
+        line=dict(color=THEME["earnings_line"], width=1.5, dash="dot"),
+        annotation_text     = "Earnings Reaction",
+        annotation_position = "top right",
+        annotation_font     = dict(size=THEME["font_size_caption"],
+                                   color=THEME["earnings_line"]),
+    )
+
+    for label, car_vals in per_event.items():
+        is_sel   = label == selected_event
+        is_other = selected_event is not None and not is_sel
+        fig.add_trace(go.Scatter(
+            x          = day_offsets,
+            y          = car_vals,
+            mode       = "lines",
+            name       = label,
+            line       = dict(
+                color  = THEME["earnings_line"] if is_sel else
+                         THEME["border_subtle"]  if is_other else
+                         THEME["neutral"],
+                width  = 2.5 if is_sel else 0.8,
+            ),
+            opacity    = 1.0 if is_sel else 0.45,
+            showlegend = is_sel,
+            hovertemplate = (
+                f"<b>{label}</b><br>"
+                "Day: %{x}<br>CAR: %{y:.2f}%<extra></extra>"
+            ),
+        ))
+
+    fig.add_trace(go.Scatter(
+        x          = day_offsets,
+        y          = average,
+        mode       = "lines",
+        name       = "Average",
+        line       = dict(
+            color  = THEME["neutral"]  if selected_event else THEME["primary"],
+            width  = 2.5,
+            dash   = "dot" if selected_event else "solid",
+        ),
+        opacity    = 0.6 if selected_event else 1.0,
+        showlegend = True,
+        hovertemplate = (
+            "<b>Average</b><br>"
+            "Day: %{x}<br>CAR: %{y:.2f}%<extra></extra>"
+        ),
+    ))
+
+    apply_base_layout(
+        fig,
+        title        = "Cumulative Abnormal Return drift (PEAD check)",
+        height       = 400,
+        margin       = dict(t=44, b=0, l=50, r=10),
+        hovermode    = "closest",
+        showlegend   = True,
+        dragmode     = False,
+        legend_style = _LEGEND_V,
+    )
+
+    fig.update_xaxes(
+        title     = dict(text="Days relative to D0",
+                         font=dict(size=THEME["font_size_body"])),
+        showgrid  = True,
+        gridcolor = THEME["chart_grid"],
+        fixedrange= True,
+    )
+    fig.update_yaxes(
+        ticksuffix = "%",
+        showgrid   = True,
+        gridcolor  = THEME["chart_grid"],
+        fixedrange = True,
+    )
+    return fig
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Canonical colors for factor detail bar chart (up to 3 factors)
+_FACTOR_BAR_COLORS = [
+    THEME["primary"],        # navy
+    THEME["earnings_line"],  # amber
+    THEME["accent"],         # teal
+]
+
+def plot_factor_detail_bar_multi(all_details: dict) -> go.Figure:
+    fig = go.Figure()
+
+    for idx, (factor_name, detail) in enumerate(all_details.items()):
+        if not detail["labels"]:
+            continue
+        fig.add_trace(go.Bar(
+            name          = factor_name,
+            x             = detail["labels"],
+            y             = detail["values"],
+            marker_color  = _FACTOR_BAR_COLORS[idx % len(_FACTOR_BAR_COLORS)],
+            hovertemplate = f"<b>{factor_name}</b><br>%{{x}}<br>%{{y:.2f}}%<extra></extra>",
+        ))
+
+    fig.add_hline(y=0, line=dict(color=THEME["border_subtle"], width=1))
+
+    apply_base_layout(
+        fig,
+        height       = 240,
+        margin       = dict(t=32, b=40, l=40, r=80),
+        showlegend   = True,
+        dragmode     = False,
+        legend_style = dict(
+            font        = dict(size=THEME["font_size_caption"],
+                               family=THEME["font_family"]),
+            orientation = "v",
+            x=1.02, y=1.0,
+            xanchor="left", yanchor="top",
+        ),
+    )
+
+    fig.update_layout(barmode="group", bargap=0.2, bargroupgap=0.05)
+    fig.update_xaxes(tickangle=-30, fixedrange=True)
+    fig.update_yaxes(
+        ticksuffix = "%",
+        zeroline   = False,
+        gridcolor  = THEME["chart_grid"],
+        fixedrange = True,
+    )
+    return fig
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+
+def plot_correlation_heatmap(
+    corr_data: dict,
+    selected_pair: tuple = None,
+) -> go.Figure:
+    z      = corr_data["z"].copy()
+    labels = corr_data["labels"]
+    n      = len(labels)
+
+    text = [
+        [f"{z[i,j]:.2f}" if j > i and not np.isnan(z[i,j]) else ""
+         for j in range(n)]
+        for i in range(n)
+    ]
+
+    z_plot = z.astype(object)
+    for i in range(n):
+        for j in range(i):
+            z_plot[i, j] = None
+        z_plot[i, i] = None
+
+    fig = go.Figure(go.Heatmap(
+        z             = z_plot,
+        x             = labels,
+        y             = labels,
+        text          = text,
+        texttemplate  = "%{text}",
+        textfont      = dict(size=THEME["font_size_body"],
+                             color=THEME["text_primary"]),
+        colorscale    = DIVERGING_CORR,
+        showscale     = False,
+        zmid=0, zmin=-1, zmax=1,
+        hovertemplate = (
+            "<b>%{y}</b> × <b>%{x}</b><br>"
+            "r = %{z:.2f}<extra></extra>"
+        ),
+    ))
+
+    car_count = len(SCATTER_CAR_OFFSETS)
+    for x0, x1, y0, y1 in [
+        (car_count-0.5, n-0.5,        car_count-0.5, car_count-0.5),
+        (car_count-0.5, car_count-0.5, -0.5,          car_count-0.5),
+    ]:
+        fig.add_shape(
+            type="line",
+            x0=x0, x1=x1, y0=y0, y1=y1,
+            xref="x", yref="y",
+            line=dict(color=THEME["neutral"], width=1, dash="dot"),
+        )
+
+    apply_base_layout(
+        fig,
+        title    = "Metric Correlation Matrix",
+        height   = 400,
+        margin   = dict(t=44, b=10, l=80, r=10),
+        dragmode = False,
+    )
+
+    fig.update_xaxes(tickangle=-45, fixedrange=True, side="bottom")
+    fig.update_yaxes(autorange="reversed", fixedrange=True)
+    return fig
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+
+def plot_predictability_scatter(
+    scatter_data: dict,
+    x_type: str, x_offset: int,
+    y_type: str, y_offset: int,
+    series: str,
+) -> go.Figure:
+    labels, x_vals, y_vals = [], [], []
+
+    for label, event in scatter_data.items():
+        xs = event[x_type].get(x_offset)
+        ys = event[y_type].get(y_offset)
+        if xs is None or ys is None:
+            continue
+        x_vals.append(xs[series])
+        y_vals.append(ys[series])
+        labels.append(label)
+
+    fig = go.Figure()
+    fig.add_hline(y=0, line=dict(color=THEME["border_subtle"], width=1))
+    fig.add_vline(x=0, line=dict(color=THEME["border_subtle"], width=1))
+
+    fig.add_trace(go.Scatter(
+        x            = x_vals,
+        y            = y_vals,
+        mode         = "markers+text",
+        text         = labels,
+        textposition = "top center",
+        textfont     = dict(size=THEME["font_size_caption"],
+                            color=THEME["text_muted"]),
+        marker       = dict(
+            color = THEME["primary"],
+            size  = 9,
+            line  = dict(color="white", width=1),
+        ),
+        hovertemplate = (
+            "<b>%{text}</b><br>"
+            "X: %{x:.2f}%<br>Y: %{y:.2f}%<extra></extra>"
+        ),
+        showlegend = False,
+    ))
+
+    x_label      = _metric_label(x_type, x_offset)
+    y_label      = _metric_label(y_type, y_offset)
+    series_label = "Idiosyncratic" if series == "idio" else "Total"
+
+    apply_base_layout(
+        fig,
+        title    = f"{series_label} — {x_label} vs {y_label}",
+        height   = 260,
+        margin   = dict(t=36, b=40, l=50, r=10),
+        hovermode= "closest",
+        dragmode = False,
+    )
+
+    fig.update_xaxes(
+        title      = dict(text=x_label, font=dict(size=THEME["font_size_body"])),
+        showgrid   = True,
+        gridcolor  = THEME["chart_grid"],
+        ticksuffix = "%",
+        fixedrange = True,
+    )
+    fig.update_yaxes(
+        title      = dict(text=y_label, font=dict(size=THEME["font_size_body"])),
+        showgrid   = True,
+        gridcolor  = THEME["chart_grid"],
+        ticksuffix = "%",
+        fixedrange = True,
+    )
+    return fig
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+
+def plot_rolling_vol(
+    vol_data: dict,
+    window: int,
+    series: str,
+    zoom_event: str = None,
+) -> go.Figure:
+    from plotly.subplots import make_subplots
+
+    dates       = vol_data["dates"]
+    daily       = vol_data["daily"]
+    rolling_vol = vol_data["rolling_vol"]
+    earnings    = vol_data["earnings"]
+
+    sorted_earnings = sorted(earnings)
+    if zoom_event:
+        from backend.compute import _quarter_label
+        d0    = next((e for e in sorted_earnings
+                      if _quarter_label(e) == zoom_event), None)
+        if d0:
+            prev_e = [e for e in sorted_earnings if e < d0]
+            next_e = [e for e in sorted_earnings if e > d0]
+            x_min  = prev_e[-1] if prev_e else dates[0]
+            x_max  = next_e[0]  if next_e else dates[-1]
+        else:
+            x_min, x_max = dates[0], dates[-1]
+    else:
+        x_min, x_max = dates[0], dates[-1]
+
+    series_label = "Idiosyncratic" if series == "idio" else "Total"
+
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
+
+    bar_colors = [
+        _hex_to_rgba(THEME["primary"],  0.25) if v >= 0
+        else _hex_to_rgba(THEME["negative"], 0.25)
+        for v in daily
+    ]
+    fig.add_trace(go.Bar(
+        x             = dates,
+        y             = daily,
+        name          = f"{series_label} Return",
+        marker_color  = bar_colors,
+        hovertemplate = "%{x|%b %d, %Y}<br>Return: %{y:.2f}%<extra></extra>",
+        showlegend    = True,
+    ), secondary_y=True)
+
+    fig.add_trace(go.Scatter(
+        x             = dates,
+        y             = rolling_vol,
+        name          = f"{window}d Vol",
+        mode          = "lines",
+        line          = dict(color=THEME["primary"], width=1.8),
+        hovertemplate = "%{x|%b %d, %Y}<br>Vol: %{y:.1f}%<extra></extra>",
+        showlegend    = True,
+    ), secondary_y=False)
+
+    for ed in earnings:
+        fig.add_vline(
+            x       = pd.Timestamp(ed).timestamp() * 1000,
+            line    = dict(color=THEME["earnings_line"], width=1, dash="dash"),
+            opacity = 0.8,
+        )
+
+    apply_base_layout(
+        fig,
+        title        = f"Rolling {window}d {series_label} Volatility",
+        height       = 280,
+        margin       = dict(t=44, b=30, l=50, r=50),
+        hovermode    = "x unified",
+        showlegend   = True,
+        legend_style = dict(
+            font        = dict(size=THEME["font_size_caption"],
+                               family=THEME["font_family"]),
+            orientation = "h",
+            x=0.0, y=-0.15,
+            bgcolor     = "rgba(0,0,0,0)",
+        ),
+    )
+
+    fig.update_xaxes(range=[x_min, x_max], fixedrange=False)
+
+    fig.update_yaxes(
+        title_text  = "Ann. Vol (%)",
+        ticksuffix  = "%",
+        showgrid    = True,
+        gridcolor   = THEME["chart_grid"],
+        secondary_y = False,
+    )
+    fig.update_yaxes(
+        title_text  = "Daily Return (%)",
+        ticksuffix  = "%",
+        showgrid    = False,
+        secondary_y = True,
+    )
+    fig.update_layout(barmode="overlay")
+    return fig
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+
+def plot_acf_pacf(acf_data: dict) -> go.Figure:
+    from plotly.subplots import make_subplots
+
+    lags         = acf_data["lags"]
+    conf         = acf_data["conf"]
+    series_label = "Idiosyncratic" if acf_data["series"] == "idio" else "Total"
+
+    fig = make_subplots(
+        rows=1, cols=2,
+        horizontal_spacing=0.12,
+    )
+
+    for col, key in enumerate(["acf", "pacf"], start=1):
+        vals = acf_data[key]
+
+        fig.add_hrect(
+            y0=-conf, y1=conf,
+            fillcolor = _hex_to_rgba(THEME["primary"], 0.06),
+            line_width= 0,
+            row=1, col=col,
+        )
+        for y_val in [conf, -conf]:
+            fig.add_hline(
+                y    = y_val,
+                line = dict(color=THEME["primary"], width=1, dash="dash"),
+                row=1, col=col,
+            )
+        fig.add_hline(
+            y    = 0,
+            line = dict(color=THEME["border_subtle"], width=1),
+            row=1, col=col,
+        )
+
+        bar_colors = [
+            THEME["primary"] if abs(v) > conf else THEME["grid"]
+            for v in vals
+        ]
+        fig.add_trace(go.Bar(
+            x             = lags,
+            y             = vals,
+            name          = key.upper(),
+            marker_color  = bar_colors,
+            showlegend    = False,
+            width         = 0.4,
+            hovertemplate = f"Lag %{{x}}<br>{key.upper()}: %{{y:.3f}}<extra></extra>",
+        ), row=1, col=col)
+
+    apply_base_layout(
+        fig,
+        height   = 260,
+        margin   = dict(t=44, b=30, l=40, r=20),
+        hovermode= "x unified",
+        dragmode = False,
+    )
+
+    # Subplot title annotations
+    fig.add_annotation(dict(
+        text="ACF", x=0.22, y=1.0,
+        xref="paper", yref="paper",
+        xanchor="center", yanchor="bottom",
+        showarrow=False,
+        font=dict(size=THEME["font_size_body"],
+                  color=THEME["text_primary"],
+                  family=THEME["font_family"]),
+    ))
+    fig.add_annotation(dict(
+        text="PACF", x=0.82, y=1.0,
+        xref="paper", yref="paper",
+        xanchor="center", yanchor="bottom",
+        showarrow=False,
+        font=dict(size=THEME["font_size_body"],
+                  color=THEME["text_primary"],
+                  family=THEME["font_family"]),
+    ))
+    # Main title
+    fig.add_annotation(
+        _title_annotation(
+            f"{series_label} Returns — {max(lags)} lags, dashed = 95% band",
+            size=THEME["font_size_body"],
+        )
+    )
+
+    fig.update_xaxes(
+        title    = dict(text="Lag", font=dict(size=THEME["font_size_body"])),
+        fixedrange=True,
+    )
+    fig.update_yaxes(fixedrange=True)
+    return fig
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+
+def plot_explorer_histogram(series: pd.Series, label: str) -> go.Figure:
+    vals  = series.dropna()
+    mean  = vals.mean()
+    std   = vals.std()
+
+    fig = go.Figure()
+
+    fig.add_trace(go.Histogram(
+        x          = vals,
+        nbinsx     = 40,
+        name       = label,
+        marker     = dict(
+            color = _hex_to_rgba(THEME["primary"], 0.7),
+            line  = dict(color=THEME["bg_panel"], width=0.5),
+        ),
+        showlegend = False,
+        hovertemplate = "%{x:.4f}<br>Count: %{y}<extra></extra>",
+    ))
+
+    for x_val, dash, color, annotation in [
+        (mean,       "solid", THEME["primary"],   f"μ = {mean:.4f}"),
+        (mean + std, "dash",  THEME["neutral"],   f"+1σ"),
+        (mean - std, "dash",  THEME["neutral"],   f"−1σ"),
+    ]:
+        fig.add_vline(
+            x                   = x_val,
+            line                = dict(color=color, width=1.2, dash=dash),
+            annotation_text     = annotation,
+            annotation_position = "top",
+            annotation_font     = dict(size=THEME["font_size_caption"],
+                                       color=color),
+        )
+
+    apply_base_layout(
+        fig,
+        title    = f"{label} — Distribution",
+        height   = 320,
+        margin   = dict(t=44, b=30, l=40, r=10),
+        hovermode= "x",
+        dragmode = False,
+    )
+
+    fig.update_xaxes(title=dict(text=label,
+                                font=dict(size=THEME["font_size_body"])))
+    fig.update_yaxes(title=dict(text="Count",
+                                font=dict(size=THEME["font_size_body"])),
+                     showgrid=True, gridcolor=THEME["chart_grid"])
+    return fig
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+
+def plot_explorer_timeseries(series: pd.Series, label: str) -> go.Figure:
+    fig = go.Figure()
+
+    colors = [
+        THEME["primary"] if v >= 0 else THEME["negative"]
+        for v in series
+    ]
+
+    fig.add_trace(go.Bar(
+        x             = series.index,
+        y             = series,
+        name          = label,
+        marker_color  = colors,
+        showlegend    = False,
+        hovertemplate = "%{x|%b %d, %Y}<br>%{y:.4f}<extra></extra>",
+    ))
+
+    apply_base_layout(
+        fig,
+        title    = f"{label} — Time Series",
+        height   = 320,
+        margin   = dict(t=44, b=30, l=40, r=10),
+        hovermode= "x unified",
+        dragmode = False,
+    )
+
+    fig.update_xaxes(showgrid=False)
+    fig.update_yaxes(showgrid=True, gridcolor=THEME["chart_grid"])
+    return fig

@@ -1,0 +1,229 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Mon Mar  2 04:19:04 2026
+
+@author: anike
+"""
+
+# components/ui.py
+"""
+Shared UI helpers for consistent card layout and typography across all tabs.
+All tabs import from here instead of writing inline HTML.
+"""
+
+import streamlit as st
+from config import THEME
+
+
+def card():
+    """
+    Returns a styled st.container(border=True).
+    Use as a context manager:
+
+        with card():
+            st.plotly_chart(fig)
+
+    CSS for the border wrapper is defined globally in app.py.
+    """
+    return st.container(border=True)
+
+
+def card_title(title: str, subtitle: str = None):
+    """
+    Renders a consistent card title inside a card container.
+    Optional subtitle renders inline to the right of the title.
+
+    Usage:
+        with card():
+            card_title("Cumulative Abnormal Returns", subtitle="2024-11-20")
+            st.plotly_chart(fig)
+    """
+    title_color    = THEME["text_primary"]
+    subtitle_color = THEME["text_muted"]
+    title_size     = THEME["font_size_title"]
+    subtitle_size  = THEME["font_size_body"]
+    font           = THEME["font_family"]
+
+    if subtitle:
+        st.markdown(
+            f"<div style='margin-bottom:6px;line-height:1.2;'>"
+            f"<span style='font-size:{title_size}px;font-weight:700;"
+            f"color:{title_color};font-family:{font};'>{title}</span>"
+            f"<span style='font-size:{subtitle_size}px;font-weight:400;"
+            f"color:{subtitle_color};font-family:{font};"
+            f"margin-left:10px;'>{subtitle}</span>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            f"<div style='margin-bottom:6px;line-height:1.2;'>"
+            f"<span style='font-size:{title_size}px;font-weight:700;"
+            f"color:{title_color};font-family:{font};'>{title}</span>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+
+
+def section_label(text: str):
+    """
+    Smaller label for control groups or table headers inside cards.
+    e.g. "Factor Exposures", "Factor Returns (%)"
+    """
+    st.markdown(
+        f"<div style='font-size:{THEME['font_size_body']}px;"
+        f"font-weight:700;color:{THEME['text_muted']};"
+        f"font-family:{THEME['font_family']};"
+        f"margin:0 0 4px;'>{text}</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def empty_state(message: str):
+    """
+    Consistent empty/hint state message.
+    e.g. "Select an event to view factor detail."
+    """
+    st.markdown(
+        f"<div style='font-size:{THEME['font_size_body']}px;"
+        f"color:{THEME['text_hint']};"
+        f"font-family:{THEME['font_family']};"
+        f"margin-top:4px;'>{message}</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def divider():
+    """Thin horizontal rule between sections inside a card."""
+    st.markdown(
+        f"<div style='border-top:1px solid {THEME['border_subtle']};"
+        f"margin:{THEME['space_sm']}px 0;'></div>",
+        unsafe_allow_html=True,
+    )
+
+
+def selected_row_label(text: str):
+    """
+    Highlighted label for the selected row in custom HTML tables.
+    Used in tab_earnings CAR table and tab_fullperiod drilldown.
+    """
+    st.markdown(
+        f"<span style='font-size:{THEME['font_size_cell']}px;"
+        f"font-weight:700;"
+        f"color:{THEME['primary']};"
+        f"background:{THEME['selected_bg']};"
+        f"padding:0 6px;"
+        f"display:block;text-align:center;"
+        f"height:26px;line-height:26px;"
+        f"border-radius:{THEME['border_radius']}px;"
+        f"border:1px solid {THEME['selected_border']};'>"
+        f"{text}</span>",
+        unsafe_allow_html=True,
+    )
+
+def render_summary_table(df: pd.DataFrame):
+    """
+    Renders a clean static HTML table for summary statistics.
+    Rows = metrics, Columns = Total / Systematic / Idiosyncratic.
+    Positive values green, negative red, neutral grey.
+    """
+    import re
+
+    def _val_color(val_str: str) -> str:
+        """Detect sign from formatted string like '149.4%' or '-36.9%'."""
+        # Extract numeric part
+        num = re.sub(r"[^\d.\-]", "", val_str)
+        try:
+            v = float(num)
+            if v > 0:  return THEME["positive"]
+            if v < 0:  return THEME["negative"]
+        except ValueError:
+            pass
+        return THEME["text_primary"]
+
+    cols        = list(df.columns)
+    rows        = list(df.index)
+    font        = THEME["font_family"]
+    sz_head     = THEME["font_size_body"]
+    sz_cell     = THEME["font_size_cell"]
+    text_muted  = THEME["text_muted"]
+    text_main   = THEME["text_primary"]
+    border      = THEME["border_subtle"]
+    bg_alt      = THEME["bg_panel_alt"]
+    bg_panel    = THEME["bg_panel"]
+    primary     = THEME["primary"]
+
+    # ── Header ────────────────────────────────────────────────────
+    header_cells = "".join([
+        f"<th style='"
+        f"font-size:{sz_head}px;font-weight:700;"
+        f"color:{text_muted};font-family:{font};"
+        f"text-align:right;padding:6px 12px;"
+        f"border-bottom:2px solid {border};"
+        f"background:{bg_alt};"
+        f"'>{c}</th>"
+        for c in cols
+    ])
+
+    header = f"""
+    <tr>
+        <th style='
+            font-size:{sz_head}px;font-weight:700;
+            color:{text_muted};font-family:{font};
+            text-align:left;padding:6px 12px;
+            border-bottom:2px solid {border};
+            background:{bg_alt};
+        '></th>
+        {header_cells}
+    </tr>
+    """
+
+    # ── Data rows ─────────────────────────────────────────────────
+    data_rows = ""
+    for i, row_label in enumerate(rows):
+        bg = bg_alt if i % 2 == 0 else bg_panel
+        is_last = i == len(rows) - 1
+        bottom_border = f"border-bottom:2px solid {border};" if is_last else f"border-bottom:1px solid {border};"
+
+        # Row label cell
+        row_html = f"""
+        <tr>
+            <td style='
+                font-size:{sz_head}px;font-weight:600;
+                color:{primary};font-family:{font};
+                text-align:left;padding:7px 12px;
+                background:{bg};
+                {bottom_border}
+            '>{row_label}</td>
+        """
+
+        # Value cells
+        for col in cols:
+            val_str   = str(df.loc[row_label, col])
+            val_color = _val_color(val_str)
+            row_html += f"""
+            <td style='
+                font-size:{sz_cell}px;font-weight:600;
+                color:{val_color};font-family:{font};
+                text-align:right;padding:7px 12px;
+                background:{bg};
+                {bottom_border}
+            '>{val_str}</td>
+            """
+
+        row_html += "</tr>"
+        data_rows += row_html
+
+    # ── Full table ────────────────────────────────────────────────
+    table_html = f"""
+    <table style='
+        width:100%;
+        border-collapse:collapse;
+        font-family:{font};
+    '>
+        <thead>{header}</thead>
+        <tbody>{data_rows}</tbody>
+    </table>
+    """
+
+    st.markdown(table_html, unsafe_allow_html=True)

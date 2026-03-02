@@ -1,0 +1,132 @@
+# tabs/tab_dataexplorer.py
+
+import streamlit as st
+import pandas as pd
+import numpy as np
+from backend.loader  import load_all
+from backend.compute import build_data_explorer
+from components.charts import plot_explorer_histogram, plot_explorer_timeseries
+from components.ui import card, card_title, section_label, empty_state
+from config import THEME
+
+
+@st.cache_data(show_spinner="Loading data...")
+def get_data():
+    return load_all()
+
+
+def _format_label(key: str) -> str:
+    if key == "NVDA Return":   return "NVDA Return"
+    if key.startswith("ret_"): return f"{key[4:]} — Return"
+    if key.startswith("exp_"): return f"{key[4:]} — Exposure"
+    return key
+
+
+def _style_table(df: pd.DataFrame):
+    """Background gradient on StdDev/Mean column using THEME palette."""
+    import matplotlib.colors as mcolors
+    import matplotlib.cm as cm
+
+    col = "StdDev/Mean"
+
+    # Build a two-stop colormap from bg_panel_alt → accent (teal)
+    cmap = mcolors.LinearSegmentedColormap.from_list(
+        "theme_green",
+        [THEME["bg_panel_alt"], THEME["accent"]],
+    )
+    return df.style.format("{:.4f}").background_gradient(
+        subset=[col],
+        cmap=cmap,
+        axis=0,
+    )
+
+
+def render():
+    df_returns, df_loadings, earnings_dates = get_data()
+
+    if "exp_selected" not in st.session_state:
+        st.session_state["exp_selected"] = "exp_Beta"
+
+    explorer     = build_data_explorer(df_returns, df_loadings)
+    returns_df   = explorer["returns_df"]
+    exposures_df = explorer["exposures_df"]
+    raw          = explorer["raw"]
+    selected     = st.session_state["exp_selected"]
+    
+    with st.expander("ℹ️  How to navigate this page", expanded=False):
+        st.markdown("""
+        **General Navigation**
+        - Dotted **amber** lines mark earnings dates across all charts.
+        - Charts update automatically based on your selections.
+    
+        **Analysis Tips**
+        - Use the **Idiosyncratic / Total** buttons *inside* the charts to toggle return types without refreshing the page.
+        - **Scatter Plot:** Choose different CAR (Cumulative Abnormal Return) or Volatility offsets to find lead/lag relationships.
+        - **Volatility Zoom:** Use the 'Zoom to Event' dropdown to isolate price action around specific earnings quarters.
+        """)
+    
+    left_col, right_col = st.columns([9, 11])
+
+    with left_col:
+
+        # ── Factor Exposures table ─────────────────────────────────
+        with card():
+            section_label("Factor Exposures")
+            exp_event = st.dataframe(
+                _style_table(exposures_df),
+                use_container_width=True,
+                height=300,
+                on_select="rerun",
+                selection_mode="single-row",
+                key="exp_exp_table",
+            )
+            if exp_event.selection.rows:
+                row_idx = exp_event.selection.rows[0]
+                factor  = exposures_df.index[row_idx]
+                new_sel = f"exp_{factor}"
+                if new_sel != st.session_state["exp_selected"]:
+                    st.session_state["exp_selected"] = new_sel
+                    st.rerun()
+
+        # ── Factor Returns table ───────────────────────────────────
+        with card():
+            section_label("Factor Returns (%)")
+            ret_event = st.dataframe(
+                _style_table(returns_df),
+                use_container_width=True,
+                height=300,
+                on_select="rerun",
+                selection_mode="single-row",
+                key="exp_ret_table",
+            )
+            if ret_event.selection.rows:
+                row_idx = ret_event.selection.rows[0]
+                factor  = returns_df.index[row_idx]
+                new_sel = ("NVDA Return" if factor == "NVDA Return"
+                           else f"ret_{factor}")
+                if new_sel != st.session_state["exp_selected"]:
+                    st.session_state["exp_selected"] = new_sel
+                    st.rerun()
+
+    with right_col:
+        series        = raw.get(selected)
+        display_label = _format_label(selected)
+
+        if series is None:
+            with card():
+                empty_state("Select a row from either table to explore.")
+        else:
+            with card():
+                #card_title(display_label)
+                fig_hist = plot_explorer_histogram(series, display_label)
+                st.plotly_chart(
+                    fig_hist,
+                    use_container_width=True,
+                    config={"displayModeBar": False},
+                )
+                fig_ts = plot_explorer_timeseries(series, display_label)
+                st.plotly_chart(
+                    fig_ts,
+                    use_container_width=True,
+                    config={"displayModeBar": False},
+                )
