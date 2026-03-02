@@ -97,8 +97,16 @@ def render():
         """, unsafe_allow_html=True)
         # 1. Purpose Statement
         st.markdown("""
-        This tab isolates price action around earnings announcements to analyze **Post-Earnings Announcement Drift (PEAD)**. By centering all data on **D0** (the event date), you can evaluate if specific quarters exhibit consistent alpha persistence or if returns are driven by broader factor exposures (Market, Beta, etc.) during the volatility window.
-        """)
+        ### Event Study: Post-Earnings Announcement Drift (PEAD)
+        This tab isolates idiosyncratic price action around NVIDIA's historical earnings announcements to analyze **Post-Earnings Announcement Drift (PEAD)**. By centering all data on **$D_0$**, we can evaluate if specific quarters exhibit consistent alpha persistence or if returns are driven by broader factor exposures (Market, Beta, etc.) during the event window.
+        
+        #### **Core Conventions**
+        * **$D_0$**: The official earnings release date (the "shock").
+        * **Cumulative Abnormal Return (CAR)**: The sum of idiosyncratic returns ($\epsilon$) isolated from the factor model: 
+        * **Pre-Event Window ($D_{-20}$ to $D_{-1}$)**: Analyzes "run-up" or anticipatory leakage in the 20 trading days leading up to the announcement.
+        * **Post-Event Window ($D_{+1}$ to $D_{+20}$)**: The **PEAD window**. Measures the drift magnitude and persistence in the 20 trading days following the release.
+        """, unsafe_allow_html=True)
+        
         
         st.divider()
     
