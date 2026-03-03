@@ -103,7 +103,7 @@ def render():
         #### **Core Conventions**
         * **$D_0$**: The official earnings release date (the "shock").
         * **Cumulative Abnormal Return (CAR)**: The sum of idiosyncratic returns ($\epsilon$) isolated from the factor model: 
-        * **Pre-Event Window ($D_{-20}$ to $D_{-1}$)**: Analyzes "run-up" or anticipatory leakage in the 20 trading days leading up to the announcement.
+        * **Pre-Event Window ($D_{-20}$ to $D_{0}$)**: Analyzes "run-up" or anticipatory leakage in the 20 trading days leading up to the announcement.
         * **Post-Event Window ($D_{+1}$ to $D_{+20}$)**: The **PEAD window**. Measures the drift magnitude and persistence in the 20 trading days following the release.
         """, unsafe_allow_html=True)
         
