@@ -166,14 +166,13 @@ def render():
             with c1:
                 window = st.selectbox(
                     "Window", [5, 20, 60],
-                    index=[5, 20, 60].index(st.session_state["pred_vol_window"]),
+                    #index=[5, 20, 60].index(st.session_state["pred_vol_window"]),
                     key="pred_vol_window",
                 )
             with c2:
                 vol_series_ui = st.selectbox(
                     "Series", ["Idiosyncratic", "Total"],
-                    index=["Idiosyncratic", "Total"].index(
-                        st.session_state["pred_vol_series"]),
+                    #index=["Idiosyncratic", "Total"].index(st.session_state["pred_vol_series"]),
                     key="pred_vol_series",
                 )
             with c3:
@@ -185,7 +184,7 @@ def render():
                     st.session_state["pred_vol_zoom"] = "Full Period"
                 zoom = st.selectbox(
                     "Zoom to Event", zoom_options,
-                    index=zoom_options.index(st.session_state["pred_vol_zoom"]),
+                    #index=zoom_options.index(st.session_state["pred_vol_zoom"]),
                     key="pred_vol_zoom",
                 )
 
