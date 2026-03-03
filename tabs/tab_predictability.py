@@ -130,13 +130,13 @@ def render():
             with c1:
                 x_label = st.selectbox(
                     "X Axis", axis_labels,
-                    index=axis_labels.index(st.session_state["pred_x"]),
+                    #index=axis_labels.index(st.session_state["pred_x"]),
                     key="pred_x",
                 )
             with c2:
                 y_label = st.selectbox(
                     "Y Axis", axis_labels,
-                    index=axis_labels.index(st.session_state["pred_y"]),
+                    #index=axis_labels.index(st.session_state["pred_y"]),
                     key="pred_y",
                 )
 
