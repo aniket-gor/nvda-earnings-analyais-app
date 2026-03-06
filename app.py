@@ -31,6 +31,7 @@ _shadow        = THEME["card_shadow"]
 _radius        = THEME["border_radius"]
 _font          = THEME["font_family"]
 _sz_body       = THEME["font_size_body"]
+_sz_title      = THEME["font_size_title"]
 _sz_caption    = THEME["font_size_caption"]
 _space_xs      = THEME["space_xs"]
 _space_sm      = THEME["space_sm"]
@@ -73,7 +74,7 @@ html, body, [data-testid="stAppViewContainer"] {{
 }}
 .stTabs [data-baseweb="tab"] {{
     font-family : {_font}, sans-serif;
-    font-size   : {_sz_body}px;
+    font-size   : {_sz_title}px !important;
     font-weight : 600;
     color       : {_text_muted};
     padding     : 6px 16px;

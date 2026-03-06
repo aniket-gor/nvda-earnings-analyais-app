@@ -75,8 +75,9 @@ def render():
         col1, col2, col3, col4 = st.columns(4)
     
         with col1:
-            st.markdown("##### Returns Drilldown")
+            st.markdown("##### Cumulative Returns Drilldown")
             st.markdown("""
+            - Shows the cumulative sum of daily returns
             - **Temporal Filter:** Click a **Year** or **Quarter** to filter all charts.
             - **Navigation:** Use **↺ Back** to reset the view to the full history.
             """)
@@ -135,9 +136,9 @@ def render():
             with title_c:
                 if year is not None:
                     breadcrumb = f"{year} → {qtr}" if qtr else str(year)
-                    card_title("Returns Drilldown", subtitle=breadcrumb)
+                    card_title("Cumulative Returns Drilldown", subtitle=breadcrumb)
                 else:
-                    card_title("Returns Drilldown")
+                    card_title("Cumulative Returns Drilldown")
             with back_c:
                 if year is not None:
                     if st.button("↺ Back", key="fp_back"):

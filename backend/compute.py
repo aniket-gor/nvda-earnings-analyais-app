@@ -61,6 +61,7 @@ def compute_summary_stats(df: pd.DataFrame,
 
         # Avg daily return
         avg_ret = r.mean() * 100
+        sum_ret = r.sum() * 100
 
         # Annualized volatility
         ann_vol = r.std() * np.sqrt(ann) * 100
@@ -75,9 +76,9 @@ def compute_summary_stats(df: pd.DataFrame,
 
         results[label] = {
             "CAGR (%)"                    : f"{cagr:.1f}%",
-            "Avg Daily Return (%)"         : f"{avg_ret:.3f}%",
             "Ann. Volatility (%)"          : f"{ann_vol:.1f}%",
             "Max Drawdown (%)"             : f"{max_dd:.1f}%",
+            "Sum of Daily Returns (%)"         : f"{sum_ret:.3f}%",
             "Sum of D+1 Returns (%)" : f"{day_n_sum:.2f}%",
         }
 

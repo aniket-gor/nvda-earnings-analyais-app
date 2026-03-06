@@ -1025,8 +1025,9 @@ def plot_acf_pacf(acf_data: dict) -> go.Figure:
 
         fig.add_hrect(
             y0=-conf, y1=conf,
-            fillcolor = _hex_to_rgba(THEME["primary"], 0.06),
+            fillcolor = _hex_to_rgba(THEME["primary"], 0.5),
             line_width= 0,
+            layer="below",
             row=1, col=col,
         )
         for y_val in [conf, -conf]:
